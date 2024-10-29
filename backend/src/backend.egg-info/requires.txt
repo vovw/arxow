@@ -1,4 +1,0 @@
-fastapi[standard]
-pypdf2
-openai
-python-multipart

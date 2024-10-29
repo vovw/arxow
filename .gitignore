@@ -1,2 +1,5 @@
 backend/.env
+backend/src/backend.egg-info/
+backend/src/__pycache__/
+
 
