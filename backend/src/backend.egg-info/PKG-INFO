@@ -1,0 +1,10 @@
+Metadata-Version: 2.1
+Name: backend
+Version: 0.1.0
+Summary: Add your description here
+Requires-Python: >=3.12
+Description-Content-Type: text/markdown
+Requires-Dist: fastapi[standard]
+Requires-Dist: pypdf2
+Requires-Dist: openai
+Requires-Dist: python-multipart
