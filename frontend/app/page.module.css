@@ -1,0 +1,55 @@
+.container {
+    padding: 2rem;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.uploadSection {
+    margin: 2rem 0;
+}
+
+.passButtons {
+    margin: 1rem 0;
+    display: flex;
+    gap: 1rem;
+}
+
+.passButtons button {
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+}
+
+.passButtons button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.loading {
+    text-align: center;
+    margin: 1rem 0;
+    font-weight: bold;
+}
+
+.passResult {
+    margin: 2rem 0;
+    padding: 1rem;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}
+
+.analysisSection {
+    margin: 1rem 0;
+}
+
+.analysisSection h3 {
+    margin-bottom: 0.5rem;
+}
+
+.analysisSection ul {
+    list-style: none;
+    padding-left: 0;
+}
+
+.analysisSection li {
+    margin: 0.5rem 0;
+}
