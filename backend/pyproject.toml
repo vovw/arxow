@@ -9,4 +9,5 @@ dependencies = [
     "pypdf2",
     "openai",
     "python-multipart",
+    "marker-pdf",
 ]

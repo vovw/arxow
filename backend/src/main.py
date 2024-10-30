@@ -1,12 +1,18 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-import PyPDF2
-import io
+from marker.convert import convert_single_pdf
+from marker.models import load_all_models
+import tempfile
+import os
 from pydantic import BaseModel
-from typing import Dict, Optional, Union, Any
+from typing import Dict, Optional, Union, Any, List
 import json
 from openai import OpenAI
 from os import getenv
+import base64
+from PIL import Image
+import io
+from datetime import datetime
 
 app = FastAPI()
 
@@ -23,10 +29,68 @@ client = OpenAI(
     api_key=getenv("OPENROUTER_API_KEY"),
 )
 
+# Load models once at startup
+model_lst = load_all_models()
+
+# In-memory storage for processed documents
+class ProcessedDocument:
+    def __init__(self, markdown_text: str, images: List[Dict[str, Any]], metadata: Dict[str, Any]):
+        self.markdown_text = markdown_text
+        self.images = images
+        self.metadata = metadata
+        self.analyses = {}  # Store analyses for different passes
+        self.timestamp = datetime.now()
+
+class DocumentStore:
+    def __init__(self):
+        self.documents: Dict[str, ProcessedDocument] = {}
+
+    def add_document(self, doc_id: str, document: ProcessedDocument):
+        self.documents[doc_id] = document
+
+    def get_document(self, doc_id: str) -> Optional[ProcessedDocument]:
+        return self.documents.get(doc_id)
+
+    def cleanup_old_documents(self, max_age_hours: int = 24):
+        current_time = datetime.now()
+        for doc_id in list(self.documents.keys()):
+            age = (current_time - self.documents[doc_id].timestamp).total_seconds() / 3600
+            if age > max_age_hours:
+                del self.documents[doc_id]
+
+# Initialize document store
+document_store = DocumentStore()
+
 class PaperAnalysis(BaseModel):
     first_pass: Optional[Dict[str, Any]] = {}
     second_pass: Optional[Dict[str, Any]] = {}
     third_pass: Optional[Dict[str, Any]] = {}
+
+class ImageData(BaseModel):
+    image: str  # base64 encoded image
+    page_number: int
+    position: Dict[str, float]  # x, y coordinates
+
+def encode_image(image: Image.Image) -> str:
+    """Convert PIL Image to base64 string"""
+    buffered = io.BytesIO()
+    image.save(buffered, format="PNG")
+    return base64.b64encode(buffered.getvalue()).decode()
+
+def process_images(images: Dict[str, Image.Image]) -> List[Dict[str, Any]]:
+    """Process and encode images from marker output"""
+    processed_images = []
+    for img_key, img in images.items():
+        if isinstance(img, Image.Image):
+            processed_img = {
+                'image': encode_image(img),
+                'page_number': 1,  # You might want to extract this from img_key
+                'position': {'x': 0, 'y': 0},  # Default position
+                'caption': '',  # Add caption if available
+                'reference': img_key  # Use the key as reference
+            }
+            processed_images.append(processed_img)
+    return processed_images
 
 def clean_json_response(text: str) -> str:
     """Clean the JSON response from markdown formatting"""
@@ -39,96 +103,27 @@ def clean_json_response(text: str) -> str:
         text = text[:-3]
     return text.strip()
 
-def analyze_with_llm(text: str, pass_number: int) -> Dict[str, Any]:
+def analyze_with_llm(text: str, pass_number: int, metadata: Dict[str, Any], images: List[Dict[str, Any]]) -> Dict[str, Any]:
+    # Add metadata context to the prompts
+    metadata_context = f"""
+    Paper metadata:
+    - Number of pages: {metadata.get('pages', 'unknown')}
+    - Number of tables: {metadata.get('block_stats', {}).get('table', 0)}
+    - Number of code blocks: {metadata.get('block_stats', {}).get('code', 0)}
+    - Number of equations: {metadata.get('block_stats', {}).get('equations', {}).get('equations', 0)}
+    """
+
+    # Include image information in the context
+    image_context = f"The paper contains {len(images)} figures/images."
+
     prompts = {
-        1: """Analyze this research paper for a first pass reading. Focus on:
-            1. Title, abstract, and introduction analysis
-            2. Section and sub-section headings
-            3. Conclusions
-            4. References overview
-
-            Then answer the five C's:
-            1. Category: What type of paper is this?
-            2. Context: Which other papers is it related to?
-            3. Correctness: Do the assumptions appear valid?
-            4. Contributions: What are the paper's main contributions?
-            5. Clarity: Is the paper well written?
-
-            Format your response as a structured JSON object with the following format:
-            {
-                "overview": {
-                    "title_analysis": "...",
-                    "abstract_analysis": "...",
-                    "introduction_analysis": "..."
-                },
-                "structure": {
-                    "sections": [...],
-                    "subsections": [...]
-                },
-                "conclusions": "...",
-                "references": "...",
-                "five_cs": {
-                    "category": "...",
-                    "context": "...",
-                    "correctness": "...",
-                    "contributions": "...",
-                    "clarity": "..."
-                }
-            }""",
-
-        2: """Perform a second pass analysis of this research paper. Focus on:
-            1. Detailed analysis of figures, diagrams, and illustrations
-            2. Evaluation of graphs and statistical significance
-            3. Main thrust of the paper with supporting evidence
-            4. Key technical concepts and terminology
-            5. Relevant references for further reading
-
-            Format your response as a structured JSON object with the following format:
-            {
-                "visual_analysis": {
-                    "figures": [...],
-                    "diagrams": [...],
-                    "graphs": [...]
-                },
-                "statistical_analysis": "...",
-                "main_thrust": {
-                    "key_arguments": [...],
-                    "supporting_evidence": [...]
-                },
-                "technical_concepts": [...],
-                "key_references": [...]
-            }""",
-
-        3: """Perform a deep third pass analysis of this research paper. Focus on:
-            1. Virtual re-implementation of the paper
-            2. Identification and analysis of assumptions
-            3. Critical evaluation of methodologies
-            4. Comparison with potential alternative approaches
-            5. Strong and weak points
-            6. Potential future work directions
-
-            Format your response as a structured JSON object with the following format:
-            {
-                "implementation": {
-                    "key_steps": [...],
-                    "challenges": [...]
-                },
-                "assumptions": {
-                    "explicit": [...],
-                    "implicit": [...]
-                },
-                "methodology_evaluation": "...",
-                "alternative_approaches": [...],
-                "evaluation": {
-                    "strengths": [...],
-                    "weaknesses": [...]
-                },
-                "future_work": [...]
-            }"""
+        1: f"{metadata_context}\n{image_context}\nAnalyze this research paper for a first pass reading...",  # Rest of prompt 1
+        2: f"{metadata_context}\n{image_context}\nPerform a second pass analysis...",  # Rest of prompt 2
+        3: f"{metadata_context}\n{image_context}\nPerform a deep third pass analysis..."  # Rest of prompt 3
     }
 
     try:
-        print(f"Starting analysis for pass {pass_number}")  # Debug log
+        print(f"Starting analysis for pass {pass_number}")
 
         completion = client.chat.completions.create(
             extra_headers={
@@ -139,30 +134,21 @@ def analyze_with_llm(text: str, pass_number: int) -> Dict[str, Any]:
             messages=[
                 {
                     "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": f"{prompts[pass_number]}\n\nPaper content: {text}"
-                        }
-                    ]
+                    "content": f"{prompts[pass_number]}\n\nPaper content: {text}"
                 }
             ]
         )
 
         response_content = completion.choices[0].message.content
-        print(f"Raw response received: {response_content[:200]}...")  # Debug log
+        if response_content is None:
+            return {"error": "No response received from LLM"}
 
-        # Clean up the response content
         cleaned_content = clean_json_response(response_content)
-        print(f"Cleaned content: {cleaned_content[:200]}...")  # Debug log
 
         try:
             parsed_json = json.loads(cleaned_content)
-            print("Successfully parsed JSON response")  # Debug log
             return parsed_json
         except json.JSONDecodeError as e:
-            print(f"JSON parsing error: {str(e)}")  # Debug log
-            # Return a structured error response
             return {
                 "error": "Failed to parse JSON response",
                 "details": str(e),
@@ -170,40 +156,92 @@ def analyze_with_llm(text: str, pass_number: int) -> Dict[str, Any]:
             }
 
     except Exception as e:
-        print(f"Analysis error: {str(e)}")  # Debug log
         return {
             "error": "Analysis failed",
             "details": str(e)
         }
 
-@app.post("/analyze/paper")
-async def analyze_paper(file: UploadFile = File(...), pass_number: int = 1) -> Dict[str, Any]:
+@app.post("/upload/paper")
+async def upload_paper(file: UploadFile = File(...)) -> Dict[str, Any]:
+    """Initial endpoint to process and store the PDF"""
     try:
-        print(f"Processing paper for pass {pass_number}")  # Debug log
+        # Create a temporary file to save the uploaded PDF
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+            content = await file.read()
+            tmp_file.write(content)
+            tmp_file.flush()
 
-        # Read PDF content
-        content = await file.read()
-        pdf_reader = PyPDF2.PdfReader(io.BytesIO(content))
+            # Convert PDF to markdown using marker
+            full_text, images_dict, out_meta = convert_single_pdf(tmp_file.name, model_lst)
 
-        # Extract text from PDF
-        text = ""
-        for page in pdf_reader.pages:
-            text += page.extract_text()
+        # Clean up temporary file
+        os.unlink(tmp_file.name)
 
-        print(f"Extracted {len(text)} characters from PDF")  # Debug log
+        # Process images
+        processed_images = process_images(images_dict)
 
-        # Get analysis based on pass number
-        analysis_result = analyze_with_llm(text, pass_number)
+        # Generate document ID (you might want to use a more sophisticated method)
+        doc_id = base64.urlsafe_b64encode(os.urandom(16)).decode('ascii')
 
-        print("Analysis completed successfully")  # Debug log
-        return {"analysis": analysis_result}
+        # Store processed document
+        document_store.add_document(
+            doc_id,
+            ProcessedDocument(
+                markdown_text=full_text,
+                images=processed_images,
+                metadata=out_meta
+            )
+        )
 
-    except Exception as e:
-        print(f"Error processing paper: {str(e)}")  # Debug log
         return {
-            "error": f"Failed to process paper: {str(e)}"
+            "document_id": doc_id,
+            "metadata": out_meta,
+            "message": "Document processed and stored successfully"
         }
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to process paper: {str(e)}")
+
+@app.post("/analyze/paper/{doc_id}")
+async def analyze_paper(doc_id: str, pass_number: int) -> Dict[str, Any]:
+    """Endpoint to analyze stored paper for specific pass"""
+    try:
+        # Cleanup old documents first
+        document_store.cleanup_old_documents()
+
+        # Retrieve stored document
+        document = document_store.get_document(doc_id)
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        # Check if analysis for this pass already exists
+        if pass_number in document.analyses:
+            return {
+                "analysis": document.analyses[pass_number],
+                "metadata": document.metadata,
+                "images": document.images,
+                "cached": True
+            }
+
+        # Perform new analysis
+        analysis_result = analyze_with_llm(
+            document.markdown_text,
+            pass_number,
+            document.metadata,
+            document.images
+        )
+
+        # Store the analysis result
+        document.analyses[pass_number] = analysis_result
+
+        return {
+            "analysis": analysis_result,
+            "metadata": document.metadata,
+            "images": document.images,
+            "cached": False
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")

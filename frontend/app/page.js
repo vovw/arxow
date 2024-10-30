@@ -1,17 +1,53 @@
 "use client";
 
 import { useState } from "react";
-import styles from "./page.module.css";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+} from "@/components/ui/alert-dialog";
+import { Loader2 } from "lucide-react";
+
+const ImageDisplay = ({ imageData }) => {
+  return (
+    <Card className="w-full mb-4">
+      <CardContent className="p-4">
+        <div className="relative">
+          <img
+            src={`data:image/png;base64,${imageData.image}`}
+            alt={imageData.caption || "Paper figure"}
+            className="w-full h-auto object-contain"
+          />
+          {imageData.caption && (
+            <p className="mt-2 text-sm text-gray-600">{imageData.caption}</p>
+          )}
+          <p className="text-xs text-gray-400">
+            Page {imageData.page_number}
+            {imageData.reference && ` | Reference: ${imageData.reference}`}
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
 
 export default function Home() {
   const [file, setFile] = useState(null);
+  const [documentId, setDocumentId] = useState(null);
   const [analysis, setAnalysis] = useState({
     first_pass: null,
     second_pass: null,
     third_pass: null,
   });
+  const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [currentPass, setCurrentPass] = useState(1); // Add state for current pass
+  const [currentPass, setCurrentPass] = useState(1);
+  const [metadata, setMetadata] = useState(null);
 
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
@@ -21,10 +57,13 @@ export default function Home() {
       second_pass: null,
       third_pass: null,
     });
-    setCurrentPass(1); // Reset to first pass when new file is uploaded
+    setImages([]);
+    setDocumentId(null);
+    setCurrentPass(1);
+    setMetadata(null);
   };
 
-  const analyzePaper = async (passNumber) => {
+  const uploadDocument = async () => {
     if (!file) return;
 
     setLoading(true);
@@ -32,28 +71,48 @@ export default function Home() {
     formData.append("file", file);
 
     try {
-      console.log("Analyzing paper for pass:", passNumber); // Debug statement
+      const response = await fetch("http://localhost:8000/upload/paper", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await response.json();
+      setDocumentId(data.document_id);
+      setMetadata(data.metadata);
+      return data.document_id;
+    } catch (error) {
+      console.error("Error uploading document:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const analyzePaper = async (passNumber) => {
+    if (!documentId && file) {
+      const newDocId = await uploadDocument();
+      if (!newDocId) return;
+    }
+
+    setLoading(true);
+    try {
       const response = await fetch(
-        `http://localhost:8000/analyze/paper?pass_number=${passNumber}`,
+        `http://localhost:8000/analyze/paper/${documentId}?pass_number=${passNumber}`,
         {
           method: "POST",
-          body: formData,
         },
       );
 
       const data = await response.json();
-      console.log("Received analysis data:", data); // Debug statement
 
-      setAnalysis((prev) => {
-        const newAnalysis = {
-          ...prev,
-          [`first_pass`]: passNumber === 1 ? data.analysis : prev.first_pass,
-          [`second_pass`]: passNumber === 2 ? data.analysis : prev.second_pass,
-          [`third_pass`]: passNumber === 3 ? data.analysis : prev.third_pass,
-        };
-        console.log("Updated analysis state:", newAnalysis); // Debug statement
-        return newAnalysis;
-      });
+      setAnalysis((prev) => ({
+        ...prev,
+        [`pass_${passNumber}`]: data.analysis,
+      }));
+
+      if (data.images) {
+        setImages(data.images);
+      }
+
       setCurrentPass(passNumber);
     } catch (error) {
       console.error("Error analyzing paper:", error);
@@ -63,32 +122,36 @@ export default function Home() {
   };
 
   const renderAnalysisContent = (content) => {
-    console.log("Rendering content:", content); // Debug statement
-
     try {
       const parsedContent =
         typeof content === "string" ? JSON.parse(content) : content;
-      console.log("Parsed content:", parsedContent); // Debug statement
 
       return (
-        <div className={styles.analysisContent}>
-          {Object.entries(parsedContent).map(([key, value]) => {
-            console.log("Rendering section:", key, value); // Debug statement
-            return (
-              <div key={key} className={styles.analysisSection}>
-                <h3>{key.replace(/_/g, " ").toUpperCase()}</h3>
+        <div className="space-y-4">
+          {Object.entries(parsedContent).map(([key, value]) => (
+            <Card key={key} className="w-full">
+              <CardHeader>
+                <CardTitle className="text-lg">
+                  {key.replace(/_/g, " ").toUpperCase()}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
                 {typeof value === "object" ? (
                   Array.isArray(value) ? (
-                    <ul>
+                    <ul className="list-disc pl-6 space-y-2">
                       {value.map((item, index) => (
-                        <li key={index}>{item}</li>
+                        <li key={index} className="text-sm">
+                          {item}
+                        </li>
                       ))}
                     </ul>
                   ) : (
-                    <ul>
+                    <ul className="space-y-2">
                       {Object.entries(value).map(([subKey, subValue]) => (
-                        <li key={subKey}>
-                          <strong>{subKey.replace(/_/g, " ")}:</strong>{" "}
+                        <li key={subKey} className="text-sm">
+                          <span className="font-medium">
+                            {subKey.replace(/_/g, " ")}:{" "}
+                          </span>
                           {typeof subValue === "object"
                             ? JSON.stringify(subValue)
                             : subValue}
@@ -97,94 +160,120 @@ export default function Home() {
                     </ul>
                   )
                 ) : (
-                  <p>{value}</p>
+                  <p className="text-sm">{value}</p>
                 )}
-              </div>
-            );
-          })}
+              </CardContent>
+            </Card>
+          ))}
         </div>
       );
     } catch (error) {
-      console.error("Error rendering content:", error); // Debug statement
+      console.error("Error rendering content:", error);
       return (
-        <div className={styles.analysisContent}>Error rendering analysis</div>
+        <Card className="w-full">
+          <CardContent>Error rendering analysis</CardContent>
+        </Card>
       );
     }
   };
 
   return (
-    <div className={styles.container}>
-      <h1>Research Paper Analyzer</h1>
+    <div className="container mx-auto py-8 px-4">
+      <h1 className="text-3xl font-bold mb-8 text-center">
+        arxow - the arxiv paper diluter
+      </h1>
 
-      <div className={styles.uploadSection}>
-        <input type="file" accept=".pdf" onChange={handleFileUpload} />
+      <Card className="mb-8">
+        <CardContent className="pt-6">
+          <div className="space-y-6">
+            <Input
+              type="file"
+              accept=".pdf"
+              onChange={handleFileUpload}
+              className="w-full"
+            />
 
-        <div className={styles.passButtons}>
-          <button
-            onClick={() => {
-              if (analysis.first_pass) {
-                setCurrentPass(1);
-              } else {
-                analyzePaper(1);
-              }
-            }}
-            disabled={!file || loading}
-            className={currentPass === 1 ? styles.activeButton : ""}
-          >
-            First Pass
-          </button>
+            <div className="flex flex-wrap gap-4 justify-center">
+              <Button
+                onClick={() => analyzePaper(1)}
+                disabled={!file || loading}
+                variant={currentPass === 1 ? "default" : "outline"}
+              >
+                First Pass
+              </Button>
 
-          <button
-            onClick={() => {
-              if (analysis.second_pass) {
-                setCurrentPass(2);
-              } else {
-                analyzePaper(2);
-              }
-            }}
-            disabled={!file || !analysis.first_pass || loading}
-            className={currentPass === 2 ? styles.activeButton : ""}
-          >
-            Second Pass
-          </button>
+              <Button
+                onClick={() => analyzePaper(2)}
+                disabled={!file || !analysis.pass_1 || loading}
+                variant={currentPass === 2 ? "default" : "outline"}
+              >
+                Second Pass
+              </Button>
 
-          <button
-            onClick={() => {
-              if (analysis.third_pass) {
-                setCurrentPass(3);
-              } else {
-                analyzePaper(3);
-              }
-            }}
-            disabled={!file || !analysis.second_pass || loading}
-            className={currentPass === 3 ? styles.activeButton : ""}
-          >
-            Third Pass
-          </button>
+              <Button
+                onClick={() => analyzePaper(3)}
+                disabled={!file || !analysis.pass_2 || loading}
+                variant={currentPass === 3 ? "default" : "outline"}
+              >
+                Third Pass
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {loading && (
+        <AlertDialog open={loading}>
+          <AlertDialogContent className="max-w-md">
+            <AlertDialogHeader>
+              <AlertDialogTitle className="flex items-center gap-2">
+                <Loader2 className="h-5 w-5 animate-spin" />
+                {documentId ? "Analyzing Paper" : "Uploading Paper"}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                Please wait while we {documentId ? "analyze" : "upload"} your
+                paper...
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Analysis Content */}
+        <div className="space-y-6">
+          {metadata && (
+            <Card className="w-full">
+              <CardHeader>
+                <CardTitle>Document Metadata</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <pre className="text-sm">
+                  {JSON.stringify(metadata, null, 2)}
+                </pre>
+              </CardContent>
+            </Card>
+          )}
+
+          {analysis[`pass_${currentPass}`] && (
+            <div>
+              <h2 className="text-2xl font-semibold mb-4">
+                Pass {currentPass} Analysis
+              </h2>
+              {renderAnalysisContent(analysis[`pass_${currentPass}`])}
+            </div>
+          )}
         </div>
-      </div>
 
-      {loading && <div className={styles.loading}>Analyzing paper...</div>}
-
-      <div className={styles.results}>
-        {analysis.first_pass && currentPass === 1 && (
-          <div className={styles.passResult}>
-            <h2>First Pass Analysis</h2>
-            {renderAnalysisContent(analysis.first_pass)}
-          </div>
-        )}
-
-        {analysis.second_pass && currentPass === 2 && (
-          <div className={styles.passResult}>
-            <h2>Second Pass Analysis</h2>
-            {renderAnalysisContent(analysis.second_pass)}
-          </div>
-        )}
-
-        {analysis.third_pass && currentPass === 3 && (
-          <div className={styles.passResult}>
-            <h2>Third Pass Analysis</h2>
-            {renderAnalysisContent(analysis.third_pass)}
+        {/* Images Panel */}
+        {images.length > 0 && (
+          <div className="space-y-6">
+            <h2 className="text-2xl font-semibold mb-4">Paper Figures</h2>
+            <div className="space-y-4">
+              {images.map((imageData, index) => (
+                <ImageDisplay key={index} imageData={imageData} />
+              ))}
+            </div>
           </div>
         )}
       </div>
