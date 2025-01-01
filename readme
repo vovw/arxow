@@ -1,17 +1,19 @@
 # task
 arxiv data parser
-take pdfs and generate markdown from it
 
-# hire
-finding and testing out models
-can you find different solutions
-articulate why they're different
-think of ways to evaluate this
-make the thing work end 2 end
+pdf --> magic --> info dump w/o bs
 
 
-# trials
-
+things which can lead us
 - colpali
-- marker
--
+- marker 
+- vision rag ????
+
+
+- important math like they key equations you can expand more if needed
+- diagrams 1 or 2 that are the soul of the paper
+- evals which are important
+- conclusion
+- usecases
+- why this paper was a thing even
+
