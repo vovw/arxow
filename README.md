@@ -14,6 +14,7 @@ Transform dense research papers into digestible summaries using AI-powered analy
 - **Smart Caching**: Stores processed documents and analyses in memory for faster re-analysis
 
 ### Advanced Features
+- **🔗 arXiv URL Auto-Fetch**: Just paste an arXiv URL - paper downloads and analyzes automatically!
 - **🧠 Deep Research Q&A**: Ask specific questions about the paper and get detailed AI-powered answers
 - **📚 Citation Extraction**: Automatically extracts and analyzes all references from the paper
 - **📥 Export Options**: Export analysis to Markdown or JSON format (⌨️ `e`)
@@ -139,16 +140,34 @@ The web interface will be available at http://localhost:3000
 
 ## Usage
 
+### Option 1: Upload a PDF
 1. Open http://localhost:3000 in your browser
-2. Upload a research paper PDF
+2. Upload a research paper PDF using the file picker
 3. Click "First Pass" to get a quick overview
-4. Click "Second Pass" for deeper analysis (requires First Pass)
-5. Click "Third Pass" for critical analysis (requires Second Pass)
+4. Click "Second Pass" for deeper analysis
+5. Click "Third Pass" for critical analysis
+
+### Option 2: Fetch from arXiv (Easiest!)
+1. Open http://localhost:3000 in your browser
+2. Click "From arXiv URL" tab
+3. Paste any arXiv URL or just the paper ID:
+   - `https://arxiv.org/abs/2301.12345`
+   - `https://arxiv.org/pdf/2301.12345.pdf`
+   - Or just `2301.12345`
+4. Press Enter or click "Fetch"
+5. Paper downloads and processes automatically!
+6. Run your analysis passes
 
 Each pass provides:
 - Structured analysis of the paper
 - Extracted figures and diagrams
 - Metadata about the document
+
+### Additional Features
+- **Deep Research**: Ask questions about the paper
+- **Export**: Download analysis as Markdown or JSON
+- **Paper Library**: Quick access to recent papers
+- **Vim Mode**: Navigate with `j/k/g/G` keys
 
 ## Docker Deployment (Optional)
 

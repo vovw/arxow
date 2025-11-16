@@ -1,6 +1,7 @@
 # Arxow Features Guide
 
 ## Table of Contents
+- [arXiv URL Auto-Fetch](#arxiv-url-auto-fetch)
 - [Three-Pass Analysis](#three-pass-analysis)
 - [Deep Research Q&A](#deep-research-qa)
 - [Citation Extraction](#citation-extraction)
@@ -8,6 +9,47 @@
 - [Paper Library](#paper-library)
 - [Vim Keybindings](#vim-keybindings)
 - [Dark Mode](#dark-mode)
+
+## arXiv URL Auto-Fetch
+
+The fastest way to analyze papers - just paste a URL!
+
+### How It Works
+1. Click the "From arXiv URL" tab
+2. Paste any arXiv URL or just the paper ID
+3. Press Enter or click "Fetch"
+4. Paper downloads automatically from arXiv
+5. Processing begins immediately
+
+### Supported URL Formats
+- **Full URL**: `https://arxiv.org/abs/2301.12345`
+- **PDF URL**: `https://arxiv.org/pdf/2301.12345.pdf`
+- **With version**: `https://arxiv.org/abs/2301.12345v1`
+- **Just the ID**: `2301.12345`
+- **Without https**: `arxiv.org/abs/2301.12345`
+
+### Benefits
+- **Zero friction**: No need to download PDFs manually
+- **One-step process**: From URL to analysis in seconds
+- **Always latest**: Fetches directly from arXiv
+- **Auto-saved**: Papers saved to library with arXiv metadata
+- **Error handling**: Clear messages if URL is invalid
+
+### Example Workflow
+```
+1. Find interesting paper on arXiv
+2. Copy URL from browser
+3. Paste into Arxow
+4. Press Enter
+5. Paper analyzed in ~30 seconds!
+```
+
+### Tips
+- You can paste the URL with or without `https://`
+- Version numbers (like `v1`) are automatically handled
+- Works with both `/abs/` and `/pdf/` URLs
+- The paper ID alone (like `2301.12345`) is enough
+- Fetched papers appear in your library like uploaded ones
 
 ## Three-Pass Analysis
 
