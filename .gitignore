@@ -1,5 +1,45 @@
+# Backend
 backend/.env
+backend/.env.local
 backend/src/backend.egg-info/
 backend/src/__pycache__/
+backend/.venv
+backend/venv
+backend/dist
+backend/build
+backend/**/__pycache__
+backend/**/*.pyc
+backend/**/*.pyo
+backend/**/*.pyd
+backend/.pytest_cache
+backend/.coverage
 
+# Frontend
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
+frontend/node_modules
+frontend/.next
+frontend/out
+frontend/dist
+frontend/build
 
+# Docker
+.env
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*.swn
+
+# OS
+.DS_Store
+Thumbs.db
+*.log
+
+# Misc
+*.tmp
+*.temp
+.cache

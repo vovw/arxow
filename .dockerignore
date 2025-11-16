@@ -1,0 +1,37 @@
+# Backend
+backend/.venv
+backend/__pycache__
+backend/**/__pycache__
+backend/.env
+backend/uv.lock
+backend/dist
+backend/build
+backend/*.egg-info
+
+# Frontend
+frontend/node_modules
+frontend/.next
+frontend/out
+frontend/.env.local
+frontend/.env.*.local
+frontend/bun.lockb
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+*.log
+*.pid
+*.seed
+*.pid.lock
