@@ -62,6 +62,7 @@ class ProcessedDocument:
         self.images = images
         self.metadata = metadata
         self.analyses = {}  # Store analyses for different passes
+        self.citations = None  # Store extracted citations
         self.timestamp = datetime.now()
 
 class DocumentStore:
@@ -455,3 +456,155 @@ async def analyze_paper(doc_id: str, pass_number: int) -> Dict[str, Any]:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+
+@app.post("/deep-research/{doc_id}")
+async def deep_research(doc_id: str, question: Dict[str, str]) -> Dict[str, Any]:
+    """
+    Deep research Q&A endpoint
+    Ask specific questions about the paper and get detailed answers
+    """
+    logger.info(f"Deep research request - Document: {doc_id}, Question: {question.get('question', '')}")
+
+    try:
+        # Retrieve stored document
+        document = document_store.get_document(doc_id)
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        user_question = question.get("question", "").strip()
+        if not user_question:
+            raise HTTPException(status_code=400, detail="Question is required")
+
+        # Use LLM to answer the question based on the paper
+        completion = client.chat.completions.create(
+            extra_headers={
+                "HTTP-Referer": "https://github.com",
+                "X-Title": "Arxow - Deep Research",
+            },
+            model=MODEL_NAME,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are an expert research assistant. Answer questions about academic papers based on their content. Provide detailed, accurate, and well-structured answers. If the paper doesn't contain information to answer the question, say so clearly."
+                },
+                {
+                    "role": "user",
+                    "content": f"""Based on this research paper, please answer the following question:
+
+Question: {user_question}
+
+Paper content:
+{document.markdown_text[:30000]}
+
+Provide a comprehensive answer based on the paper's content."""
+                }
+            ],
+            temperature=0.3,
+        )
+
+        answer = completion.choices[0].message.content
+        if answer is None:
+            raise HTTPException(status_code=500, detail="No response from LLM")
+
+        logger.info(f"Deep research completed successfully for doc {doc_id}")
+
+        return {
+            "question": user_question,
+            "answer": answer,
+            "document_id": doc_id
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Deep research failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Deep research failed: {str(e)}")
+
+@app.post("/extract/citations/{doc_id}")
+async def extract_citations(doc_id: str) -> Dict[str, Any]:
+    """
+    Extract citations and references from the paper
+    """
+    logger.info(f"Citation extraction request - Document: {doc_id}")
+
+    try:
+        # Retrieve stored document
+        document = document_store.get_document(doc_id)
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        # Check if citations were already extracted
+        if hasattr(document, 'citations') and document.citations:
+            return {
+                "citations": document.citations,
+                "cached": True
+            }
+
+        # Use LLM to extract citations
+        completion = client.chat.completions.create(
+            extra_headers={
+                "HTTP-Referer": "https://github.com",
+                "X-Title": "Arxow - Citation Extraction",
+            },
+            model=MODEL_NAME,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are an expert at extracting citations from academic papers. Extract all citations and return them in a structured JSON format."
+                },
+                {
+                    "role": "user",
+                    "content": f"""Extract all citations from this research paper. Return a JSON object with the following structure:
+
+{{
+  "references": [
+    {{
+      "number": "citation number or key",
+      "title": "paper title",
+      "authors": ["author1", "author2"],
+      "year": "publication year",
+      "venue": "conference or journal name",
+      "relevance": "brief description of why this paper is cited"
+    }}
+  ],
+  "key_references": ["list of most important reference numbers"],
+  "total_citations": number
+}}
+
+Paper content:
+{document.markdown_text[:30000]}"""
+                }
+            ],
+            temperature=0.2,
+        )
+
+        response_content = completion.choices[0].message.content
+        if response_content is None:
+            raise HTTPException(status_code=500, detail="No response from LLM")
+
+        cleaned_content = clean_json_response(response_content)
+
+        try:
+            citations = json.loads(cleaned_content)
+            # Store citations in document
+            document.citations = citations
+
+            logger.info(f"Extracted {citations.get('total_citations', 0)} citations")
+
+            return {
+                "citations": citations,
+                "cached": False
+            }
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse citations JSON: {str(e)}")
+            return {
+                "error": "Failed to parse citations",
+                "details": str(e),
+                "raw_content": cleaned_content[:500]
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Citation extraction failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Citation extraction failed: {str(e)}")

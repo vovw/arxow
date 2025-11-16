@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -11,14 +11,29 @@ import {
   AlertDialogTitle,
   AlertDialogDescription,
 } from "@/components/ui/alert-dialog";
-import { Loader2, AlertCircle } from "lucide-react";
+import {
+  Loader2,
+  AlertCircle,
+  Moon,
+  Sun,
+  Keyboard,
+  Sparkles,
+  FileText,
+  TrendingUp,
+  Brain,
+} from "lucide-react";
+import { ThemeProvider, useTheme } from "@/components/theme-provider";
+import { useKeyboardShortcuts, useVimMode } from "@/hooks/useVimMode";
+import { KeyboardHelp } from "@/components/keyboard-help";
+import { ExportMenu } from "@/components/export-menu";
+import { PaperLibrary } from "@/components/paper-library";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 const ImageDisplay = ({ imageData }) => {
   return (
-    <Card className="w-full mb-4">
-      <CardContent className="p-4">
+    <Card className="w-full mb-4 overflow-hidden animate-fade-in">
+      <CardContent className="p-0">
         <div className="relative">
           <img
             src={`data:image/png;base64,${imageData.image}`}
@@ -26,44 +41,54 @@ const ImageDisplay = ({ imageData }) => {
             className="w-full h-auto object-contain"
           />
           {imageData.caption && (
-            <p className="mt-2 text-sm text-gray-600">{imageData.caption}</p>
+            <div className="p-4 bg-gradient-to-t from-background/90 to-transparent">
+              <p className="text-sm text-muted-foreground">{imageData.caption}</p>
+            </div>
           )}
-          <p className="text-xs text-gray-400">
+          <div className="absolute top-2 right-2 px-2 py-1 bg-background/80 backdrop-blur-sm rounded text-xs text-muted-foreground">
             Page {imageData.page_number}
-            {imageData.reference && ` | Reference: ${imageData.reference}`}
-          </p>
+            {imageData.reference && ` • ${imageData.reference}`}
+          </div>
         </div>
       </CardContent>
     </Card>
   );
 };
 
-export default function Home() {
+function MainContent() {
   const [file, setFile] = useState(null);
   const [documentId, setDocumentId] = useState(null);
   const [analysis, setAnalysis] = useState({
-    first_pass: null,
-    second_pass: null,
-    third_pass: null,
+    pass_1: null,
+    pass_2: null,
+    pass_3: null,
   });
   const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [currentPass, setCurrentPass] = useState(1);
   const [metadata, setMetadata] = useState(null);
   const [error, setError] = useState(null);
+  const [deepResearch, setDeepResearch] = useState(null);
+  const [deepResearchLoading, setDeepResearchLoading] = useState(false);
+  const [question, setQuestion] = useState("");
+
+  const { theme, toggleTheme } = useTheme();
+  const { vimMode, showHelp, setShowHelp } = useVimMode();
 
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     setFile(file);
     setAnalysis({
-      first_pass: null,
-      second_pass: null,
-      third_pass: null,
+      pass_1: null,
+      pass_2: null,
+      pass_3: null,
     });
     setImages([]);
     setDocumentId(null);
     setCurrentPass(1);
     setMetadata(null);
+    setError(null);
+    setDeepResearch(null);
   };
 
   const uploadDocument = async () => {
@@ -88,6 +113,15 @@ export default function Home() {
       const data = await response.json();
       setDocumentId(data.document_id);
       setMetadata(data.metadata);
+
+      // Save to library
+      savePaperToLibrary({
+        id: data.document_id,
+        filename: file.name,
+        timestamp: Date.now(),
+        metadata: data.metadata,
+      });
+
       return data.document_id;
     } catch (error) {
       console.error("Error uploading document:", error);
@@ -115,7 +149,7 @@ export default function Home() {
         `${API_URL}/analyze/paper/${docIdToUse}?pass_number=${passNumber}`,
         {
           method: "POST",
-        },
+        }
       );
 
       if (!response.ok) {
@@ -147,6 +181,68 @@ export default function Home() {
     }
   };
 
+  const handleDeepResearch = async () => {
+    if (!question.trim() || !documentId) return;
+
+    setDeepResearchLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`${API_URL}/deep-research/${documentId}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ question: question.trim() }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || "Deep research failed");
+      }
+
+      const data = await response.json();
+      setDeepResearch({
+        question: question.trim(),
+        answer: data.answer,
+        timestamp: Date.now(),
+      });
+      setQuestion("");
+    } catch (error) {
+      console.error("Error in deep research:", error);
+      setError(error.message || "Deep research failed");
+    } finally {
+      setDeepResearchLoading(false);
+    }
+  };
+
+  const savePaperToLibrary = (paper) => {
+    const existing = JSON.parse(localStorage.getItem("arxow-papers") || "[]");
+    const filtered = existing.filter((p) => p.id !== paper.id);
+    const updated = [paper, ...filtered].slice(0, 10);
+    localStorage.setItem("arxow-papers", JSON.stringify(updated));
+  };
+
+  const handleLoadPaper = (paper) => {
+    setDocumentId(paper.id);
+    setMetadata(paper.metadata);
+    setFile(new File([""], paper.filename, { type: "application/pdf" }));
+  };
+
+  const handleExport = useCallback(() => {
+    // Export functionality is handled by ExportMenu component
+  }, []);
+
+  useKeyboardShortcuts({
+    onFirstPass: () => analyzePaper(1),
+    onSecondPass: () => analyzePaper(2),
+    onThirdPass: () => analyzePaper(3),
+    onToggleHelp: () => setShowHelp((prev) => !prev),
+    onToggleTheme: toggleTheme,
+    onExport: handleExport,
+    vimMode,
+  });
+
   const renderAnalysisContent = (content) => {
     try {
       const parsedContent =
@@ -155,9 +251,9 @@ export default function Home() {
       return (
         <div className="space-y-4">
           {Object.entries(parsedContent).map(([key, value]) => (
-            <Card key={key} className="w-full">
+            <Card key={key} className="w-full border-l-4 border-l-primary/50 animate-fade-in">
               <CardHeader>
-                <CardTitle className="text-lg">
+                <CardTitle className="text-lg flex items-center gap-2">
                   {key.replace(/_/g, " ").toUpperCase()}
                 </CardTitle>
               </CardHeader>
@@ -166,27 +262,31 @@ export default function Home() {
                   Array.isArray(value) ? (
                     <ul className="list-disc pl-6 space-y-2">
                       {value.map((item, index) => (
-                        <li key={index} className="text-sm">
-                          {item}
+                        <li key={index} className="text-sm leading-relaxed">
+                          {typeof item === "object"
+                            ? JSON.stringify(item, null, 2)
+                            : item}
                         </li>
                       ))}
                     </ul>
                   ) : (
-                    <ul className="space-y-2">
+                    <dl className="space-y-3">
                       {Object.entries(value).map(([subKey, subValue]) => (
-                        <li key={subKey} className="text-sm">
-                          <span className="font-medium">
-                            {subKey.replace(/_/g, " ")}:{" "}
-                          </span>
-                          {typeof subValue === "object"
-                            ? JSON.stringify(subValue)
-                            : subValue}
-                        </li>
+                        <div key={subKey} className="border-l-2 border-muted pl-4">
+                          <dt className="text-sm font-semibold text-muted-foreground mb-1">
+                            {subKey.replace(/_/g, " ")}
+                          </dt>
+                          <dd className="text-sm">
+                            {typeof subValue === "object"
+                              ? JSON.stringify(subValue, null, 2)
+                              : String(subValue)}
+                          </dd>
+                        </div>
                       ))}
-                    </ul>
+                    </dl>
                   )
                 ) : (
-                  <p className="text-sm">{value}</p>
+                  <p className="text-sm leading-relaxed">{value}</p>
                 )}
               </CardContent>
             </Card>
@@ -196,127 +296,277 @@ export default function Home() {
     } catch (error) {
       console.error("Error rendering content:", error);
       return (
-        <Card className="w-full">
-          <CardContent>Error rendering analysis</CardContent>
+        <Card className="w-full border-destructive">
+          <CardContent className="pt-6">
+            <p className="text-destructive">Error rendering analysis</p>
+          </CardContent>
         </Card>
       );
     }
   };
 
+  const getPassIcon = (passNum) => {
+    switch (passNum) {
+      case 1:
+        return <FileText className="h-4 w-4" />;
+      case 2:
+        return <TrendingUp className="h-4 w-4" />;
+      case 3:
+        return <Brain className="h-4 w-4" />;
+      default:
+        return null;
+    }
+  };
+
   return (
-    <div className="container mx-auto py-8 px-4">
-      <h1 className="text-3xl font-bold mb-8 text-center">
-        arxow - the arxiv paper diluter
-      </h1>
-
-      <Card className="mb-8">
-        <CardContent className="pt-6">
-          <div className="space-y-6">
-            <Input
-              type="file"
-              accept=".pdf"
-              onChange={handleFileUpload}
-              className="w-full"
-            />
-
-            <div className="flex flex-wrap gap-4 justify-center">
-              <Button
-                onClick={() => analyzePaper(1)}
-                disabled={!file || loading}
-                variant={currentPass === 1 ? "default" : "outline"}
-              >
-                First Pass
-              </Button>
-
-              <Button
-                onClick={() => analyzePaper(2)}
-                disabled={!file || !analysis.pass_1 || loading}
-                variant={currentPass === 2 ? "default" : "outline"}
-              >
-                Second Pass
-              </Button>
-
-              <Button
-                onClick={() => analyzePaper(3)}
-                disabled={!file || !analysis.pass_2 || loading}
-                variant={currentPass === 3 ? "default" : "outline"}
-              >
-                Third Pass
-              </Button>
-            </div>
+    <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/20">
+      <div className="container mx-auto py-8 px-4 max-w-7xl">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-8 animate-fade-in">
+          <div>
+            <h1 className="text-4xl font-bold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent">
+              arxow
+            </h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              AI-Powered Research Paper Analyzer
+            </p>
           </div>
-        </CardContent>
-      </Card>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setShowHelp(true)}
+              title="Keyboard shortcuts (?)"
+            >
+              <Keyboard className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={toggleTheme}
+              title="Toggle theme (Shift+D)"
+            >
+              {theme === "dark" ? (
+                <Sun className="h-4 w-4" />
+              ) : (
+                <Moon className="h-4 w-4" />
+              )}
+            </Button>
+          </div>
+        </div>
 
-      {error && (
-        <Card className="mb-8 border-red-500">
+        {/* Paper Library */}
+        <PaperLibrary onLoadPaper={handleLoadPaper} />
+
+        {/* Upload Card */}
+        <Card className="mb-8 animate-fade-in">
           <CardContent className="pt-6">
-            <div className="flex items-start gap-3 text-red-600">
-              <AlertCircle className="h-5 w-5 mt-0.5" />
+            <div className="space-y-6">
               <div>
-                <h3 className="font-semibold mb-1">Error</h3>
-                <p className="text-sm">{error}</p>
+                <label className="text-sm font-medium mb-2 block">
+                  Upload Research Paper (PDF)
+                </label>
+                <Input
+                  type="file"
+                  accept=".pdf"
+                  onChange={handleFileUpload}
+                  className="w-full cursor-pointer"
+                />
+              </div>
+
+              <div className="flex flex-wrap gap-3 justify-center">
+                {[1, 2, 3].map((passNum) => (
+                  <Button
+                    key={passNum}
+                    onClick={() => analyzePaper(passNum)}
+                    disabled={
+                      !file ||
+                      loading ||
+                      (passNum === 2 && !analysis.pass_1) ||
+                      (passNum === 3 && !analysis.pass_2)
+                    }
+                    variant={currentPass === passNum ? "default" : "outline"}
+                    className="flex-1 min-w-[150px]"
+                  >
+                    {getPassIcon(passNum)}
+                    <span className="ml-2">
+                      Pass {passNum}
+                      {passNum === 1 && " (1)"}
+                      {passNum === 2 && " (2)"}
+                      {passNum === 3 && " (3)"}
+                    </span>
+                  </Button>
+                ))}
+                <ExportMenu
+                  analysis={analysis}
+                  metadata={metadata}
+                  filename={file?.name || "paper"}
+                />
               </div>
             </div>
           </CardContent>
         </Card>
-      )}
 
-      {loading && (
-        <AlertDialog open={loading}>
-          <AlertDialogContent className="max-w-md">
-            <AlertDialogHeader>
-              <AlertDialogTitle className="flex items-center gap-2">
-                <Loader2 className="h-5 w-5 animate-spin" />
-                {documentId ? "Analyzing Paper" : "Uploading Paper"}
-              </AlertDialogTitle>
-              <AlertDialogDescription>
-                Please wait while we {documentId ? "analyze" : "upload"} your
-                paper...
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-          </AlertDialogContent>
-        </AlertDialog>
-      )}
+        {/* Deep Research */}
+        {documentId && (
+          <Card className="mb-8 border-2 border-primary/20 animate-fade-in">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-primary" />
+                Deep Research Q&A
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Ask a question about the paper..."
+                  value={question}
+                  onChange={(e) => setQuestion(e.target.value)}
+                  onKeyPress={(e) => e.key === "Enter" && handleDeepResearch()}
+                  disabled={deepResearchLoading}
+                />
+                <Button
+                  onClick={handleDeepResearch}
+                  disabled={!question.trim() || deepResearchLoading}
+                >
+                  {deepResearchLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    "Ask"
+                  )}
+                </Button>
+              </div>
+              {deepResearch && (
+                <div className="mt-4 p-4 bg-muted/50 rounded-lg">
+                  <p className="text-sm font-semibold mb-2">
+                    Q: {deepResearch.question}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    A: {deepResearch.answer}
+                  </p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Analysis Content */}
-        <div className="space-y-6">
-          {metadata && (
-            <Card className="w-full">
-              <CardHeader>
-                <CardTitle>Document Metadata</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <pre className="text-sm">
-                  {JSON.stringify(metadata, null, 2)}
-                </pre>
-              </CardContent>
-            </Card>
-          )}
+        {/* Error Display */}
+        {error && (
+          <Card className="mb-8 border-destructive animate-fade-in">
+            <CardContent className="pt-6">
+              <div className="flex items-start gap-3 text-destructive">
+                <AlertCircle className="h-5 w-5 mt-0.5" />
+                <div>
+                  <h3 className="font-semibold mb-1">Error</h3>
+                  <p className="text-sm">{error}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
-          {analysis[`pass_${currentPass}`] && (
-            <div>
-              <h2 className="text-2xl font-semibold mb-4">
-                Pass {currentPass} Analysis
-              </h2>
-              {renderAnalysisContent(analysis[`pass_${currentPass}`])}
+        {/* Loading Dialog */}
+        {loading && (
+          <AlertDialog open={loading}>
+            <AlertDialogContent className="max-w-md">
+              <AlertDialogHeader>
+                <AlertDialogTitle className="flex items-center gap-2">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  {documentId ? "Analyzing Paper" : "Uploading Paper"}
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  Please wait while we {documentId ? "analyze" : "upload"} your
+                  paper. This may take a minute...
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
+
+        {/* Main Content Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Analysis Content */}
+          <div className="space-y-6">
+            {metadata && (
+              <Card className="w-full animate-fade-in">
+                <CardHeader>
+                  <CardTitle>Document Metadata</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <dl className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <dt className="font-semibold text-muted-foreground">
+                        Pages
+                      </dt>
+                      <dd>{metadata.pages || "N/A"}</dd>
+                    </div>
+                    <div>
+                      <dt className="font-semibold text-muted-foreground">
+                        Tables
+                      </dt>
+                      <dd>{metadata.block_stats?.table || 0}</dd>
+                    </div>
+                    <div>
+                      <dt className="font-semibold text-muted-foreground">
+                        Code Blocks
+                      </dt>
+                      <dd>{metadata.block_stats?.code || 0}</dd>
+                    </div>
+                    <div>
+                      <dt className="font-semibold text-muted-foreground">
+                        Equations
+                      </dt>
+                      <dd>
+                        {metadata.block_stats?.equations?.equations || 0}
+                      </dd>
+                    </div>
+                  </dl>
+                </CardContent>
+              </Card>
+            )}
+
+            {analysis[`pass_${currentPass}`] && (
+              <div>
+                <h2 className="text-2xl font-semibold mb-4 flex items-center gap-2">
+                  {getPassIcon(currentPass)}
+                  Pass {currentPass} Analysis
+                </h2>
+                {renderAnalysisContent(analysis[`pass_${currentPass}`])}
+              </div>
+            )}
+          </div>
+
+          {/* Images Panel */}
+          {images.length > 0 && (
+            <div className="space-y-6">
+              <h2 className="text-2xl font-semibold mb-4">Paper Figures</h2>
+              <div className="space-y-4">
+                {images.map((imageData, index) => (
+                  <ImageDisplay key={index} imageData={imageData} />
+                ))}
+              </div>
             </div>
           )}
         </div>
 
-        {/* Images Panel */}
-        {images.length > 0 && (
-          <div className="space-y-6">
-            <h2 className="text-2xl font-semibold mb-4">Paper Figures</h2>
-            <div className="space-y-4">
-              {images.map((imageData, index) => (
-                <ImageDisplay key={index} imageData={imageData} />
-              ))}
-            </div>
+        {/* Vim Mode Indicator */}
+        {vimMode && (
+          <div className="fixed bottom-4 right-4 px-3 py-1.5 bg-primary text-primary-foreground rounded-full text-xs font-medium shadow-lg">
+            VIM Mode • Press ? for help
           </div>
         )}
       </div>
+
+      {/* Keyboard Help Modal */}
+      <KeyboardHelp open={showHelp} onClose={() => setShowHelp(false)} />
     </div>
+  );
+}
+
+export default function Home() {
+  return (
+    <ThemeProvider>
+      <MainContent />
+    </ThemeProvider>
   );
 }

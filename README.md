@@ -4,14 +4,35 @@ Transform dense research papers into digestible summaries using AI-powered analy
 
 ## Features
 
+### Core Analysis
 - **PDF to Markdown Conversion**: Uses Marker-PDF for high-quality extraction of text, equations, and figures
 - **Multi-Pass Analysis**: Three-level reading approach (inspired by the three-pass method)
-  - First Pass: Quick overview, main contributions, and key findings
-  - Second Pass: Deeper dive into methodology, experiments, and results
-  - Third Pass: Critical analysis, reproducibility assessment, and detailed insights
+  - **First Pass** (⌨️ `1`): Quick overview, main contributions, and key findings
+  - **Second Pass** (⌨️ `2`): Deeper dive into methodology, experiments, and results
+  - **Third Pass** (⌨️ `3`): Critical analysis, reproducibility assessment, and detailed insights
 - **Figure Extraction**: Automatically extracts and displays key diagrams and figures
 - **Smart Caching**: Stores processed documents and analyses in memory for faster re-analysis
-- **Modern UI**: Clean, responsive interface built with Next.js and Tailwind CSS
+
+### Advanced Features
+- **🧠 Deep Research Q&A**: Ask specific questions about the paper and get detailed AI-powered answers
+- **📚 Citation Extraction**: Automatically extracts and analyzes all references from the paper
+- **📥 Export Options**: Export analysis to Markdown or JSON format (⌨️ `e`)
+- **📖 Paper Library**: Recent papers saved locally for quick re-access
+- **⚡ Vim Keybindings**: Full keyboard navigation for power users
+  - `j/k` - Scroll down/up
+  - `g/G` - Jump to top/bottom
+  - `1/2/3` - Run analysis passes
+  - `Shift+D` - Toggle dark mode
+  - `?` - Show keyboard shortcuts
+  - `e` - Export analysis
+- **🌙 Dark Mode**: Beautiful dark theme with persistent preference
+
+### Modern UI
+- **Gradient Design**: Beautiful gradients and animations
+- **Responsive Layout**: Works perfectly on desktop and mobile
+- **Loading States**: Clear visual feedback during processing
+- **Error Handling**: Comprehensive error messages and recovery
+- **Accessibility**: Full keyboard navigation and ARIA labels
 
 ## Tech Stack
 
