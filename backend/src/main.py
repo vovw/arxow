@@ -14,6 +14,8 @@ from PIL import Image
 import io
 from datetime import datetime
 import logging
+import requests
+import re
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -608,3 +610,111 @@ Paper content:
     except Exception as e:
         logger.error(f"Citation extraction failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Citation extraction failed: {str(e)}")
+
+def extract_arxiv_id(url: str) -> Optional[str]:
+    """
+    Extract arXiv ID from various arXiv URL formats
+    Supports:
+    - https://arxiv.org/abs/2301.12345
+    - https://arxiv.org/pdf/2301.12345.pdf
+    - https://arxiv.org/abs/2301.12345v1
+    - arxiv.org/abs/2301.12345
+    """
+    patterns = [
+        r'arxiv\.org/abs/(\d+\.\d+)',
+        r'arxiv\.org/pdf/(\d+\.\d+)',
+        r'(\d{4}\.\d{4,5})',  # Just the ID
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, url)
+        if match:
+            return match.group(1)
+
+    return None
+
+def download_arxiv_pdf(arxiv_id: str) -> bytes:
+    """
+    Download PDF from arXiv given an arXiv ID
+    """
+    pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
+    logger.info(f"Downloading PDF from {pdf_url}")
+
+    try:
+        response = requests.get(pdf_url, timeout=30)
+        response.raise_for_status()
+        return response.content
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to download PDF: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Failed to download PDF from arXiv: {str(e)}")
+
+@app.post("/upload/from-url")
+async def upload_from_url(url_data: Dict[str, str]) -> Dict[str, Any]:
+    """
+    Upload and process a paper from a URL (arXiv, etc.)
+    - Automatically detects arXiv URLs
+    - Downloads the PDF
+    - Processes it like a regular upload
+    """
+    if model_lst is None:
+        raise HTTPException(status_code=500, detail="Marker models not loaded. Check server logs.")
+
+    url = url_data.get("url", "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="URL is required")
+
+    logger.info(f"Processing URL: {url}")
+
+    # Extract arXiv ID
+    arxiv_id = extract_arxiv_id(url)
+    if not arxiv_id:
+        raise HTTPException(status_code=400, detail="Invalid or unsupported URL. Currently only arXiv URLs are supported.")
+
+    try:
+        # Download PDF from arXiv
+        pdf_content = download_arxiv_pdf(arxiv_id)
+
+        # Create a temporary file to save the PDF
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+            tmp_file.write(pdf_content)
+            tmp_file.flush()
+
+            # Convert PDF to markdown using marker
+            full_text, images_dict, out_meta = convert_single_pdf(tmp_file.name, model_lst)
+
+        # Clean up temporary file
+        os.unlink(tmp_file.name)
+
+        # Process images
+        processed_images = process_images(images_dict)
+        logger.info(f"Extracted {len(processed_images)} images from PDF")
+
+        # Generate document ID
+        doc_id = base64.urlsafe_b64encode(os.urandom(16)).decode('ascii')
+
+        # Store processed document
+        document_store.add_document(
+            doc_id,
+            ProcessedDocument(
+                markdown_text=full_text,
+                images=processed_images,
+                metadata=out_meta
+            )
+        )
+
+        logger.info(f"Document processed successfully from URL. ID: {doc_id}")
+
+        return {
+            "document_id": doc_id,
+            "metadata": out_meta,
+            "message": "Document processed and stored successfully",
+            "filename": f"arxiv_{arxiv_id}.pdf",
+            "arxiv_id": arxiv_id,
+            "source_url": url
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to process paper from URL: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to process paper: {str(e)}")

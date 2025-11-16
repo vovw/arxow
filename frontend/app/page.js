@@ -71,6 +71,8 @@ function MainContent() {
   const [deepResearch, setDeepResearch] = useState(null);
   const [deepResearchLoading, setDeepResearchLoading] = useState(false);
   const [question, setQuestion] = useState("");
+  const [arxivUrl, setArxivUrl] = useState("");
+  const [uploadMode, setUploadMode] = useState("file"); // "file" or "url"
 
   const { theme, toggleTheme } = useTheme();
   const { vimMode, showHelp, setShowHelp } = useVimMode();
@@ -132,11 +134,60 @@ function MainContent() {
     }
   };
 
+  const uploadFromUrl = async () => {
+    if (!arxivUrl.trim()) return;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`${API_URL}/upload/from-url`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ url: arxivUrl.trim() }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || "Failed to fetch paper from URL");
+      }
+
+      const data = await response.json();
+      setDocumentId(data.document_id);
+      setMetadata(data.metadata);
+      setFile(new File([""], data.filename, { type: "application/pdf" }));
+
+      // Save to library
+      savePaperToLibrary({
+        id: data.document_id,
+        filename: data.filename,
+        timestamp: Date.now(),
+        metadata: data.metadata,
+        arxiv_id: data.arxiv_id,
+        source_url: data.source_url,
+      });
+
+      return data.document_id;
+    } catch (error) {
+      console.error("Error fetching paper from URL:", error);
+      setError(error.message || "Failed to fetch paper from URL");
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const analyzePaper = async (passNumber) => {
     let docIdToUse = documentId;
 
-    if (!documentId && file) {
+    if (!documentId && uploadMode === "file" && file) {
       const newDocId = await uploadDocument();
+      if (!newDocId) return;
+      docIdToUse = newDocId;
+    } else if (!documentId && uploadMode === "url" && arxivUrl.trim()) {
+      const newDocId = await uploadFromUrl();
       if (!newDocId) return;
       docIdToUse = newDocId;
     }
@@ -362,17 +413,72 @@ function MainContent() {
         <Card className="mb-8 animate-fade-in">
           <CardContent className="pt-6">
             <div className="space-y-6">
-              <div>
-                <label className="text-sm font-medium mb-2 block">
-                  Upload Research Paper (PDF)
-                </label>
-                <Input
-                  type="file"
-                  accept=".pdf"
-                  onChange={handleFileUpload}
-                  className="w-full cursor-pointer"
-                />
+              {/* Upload Mode Selector */}
+              <div className="flex gap-2 p-1 bg-muted rounded-lg">
+                <button
+                  onClick={() => setUploadMode("file")}
+                  className={`flex-1 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                    uploadMode === "file"
+                      ? "bg-background shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Upload PDF
+                </button>
+                <button
+                  onClick={() => setUploadMode("url")}
+                  className={`flex-1 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                    uploadMode === "url"
+                      ? "bg-background shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  From arXiv URL
+                </button>
               </div>
+
+              {/* File Upload */}
+              {uploadMode === "file" && (
+                <div>
+                  <label className="text-sm font-medium mb-2 block">
+                    Upload Research Paper (PDF)
+                  </label>
+                  <Input
+                    type="file"
+                    accept=".pdf"
+                    onChange={handleFileUpload}
+                    className="w-full cursor-pointer"
+                  />
+                </div>
+              )}
+
+              {/* URL Input */}
+              {uploadMode === "url" && (
+                <div>
+                  <label className="text-sm font-medium mb-2 block">
+                    Paste arXiv URL
+                  </label>
+                  <div className="flex gap-2">
+                    <Input
+                      type="text"
+                      placeholder="https://arxiv.org/abs/2301.12345 or just 2301.12345"
+                      value={arxivUrl}
+                      onChange={(e) => setArxivUrl(e.target.value)}
+                      onKeyPress={(e) => e.key === "Enter" && uploadFromUrl()}
+                      className="flex-1"
+                    />
+                    <Button
+                      onClick={uploadFromUrl}
+                      disabled={!arxivUrl.trim() || loading}
+                    >
+                      Fetch
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Supports: arxiv.org/abs/ID, arxiv.org/pdf/ID.pdf, or just the ID
+                  </p>
+                </div>
+              )}
 
               <div className="flex flex-wrap gap-3 justify-center">
                 {[1, 2, 3].map((passNum) => (
@@ -380,7 +486,8 @@ function MainContent() {
                     key={passNum}
                     onClick={() => analyzePaper(passNum)}
                     disabled={
-                      !file ||
+                      (uploadMode === "file" && !file) ||
+                      (uploadMode === "url" && !arxivUrl.trim()) ||
                       loading ||
                       (passNum === 2 && !analysis.pass_1) ||
                       (passNum === 3 && !analysis.pass_2)
