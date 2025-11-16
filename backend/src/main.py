@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from marker.convert import convert_single_pdf
 from marker.models import load_all_models
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 # Environment validation
 OPENROUTER_API_KEY = getenv("OPENROUTER_API_KEY")
 if not OPENROUTER_API_KEY:
-    logger.warning("OPENROUTER_API_KEY not set! API calls will fail.")
+    logger.warning("OPENROUTER_API_KEY not set! API calls will use user-provided keys only.")
 
 MODEL_NAME = getenv("MODEL_NAME", "google/gemini-flash-1.5")
 CORS_ORIGINS = getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
@@ -43,10 +43,34 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-client = OpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=OPENROUTER_API_KEY,
-)
+def get_api_key(request: Request) -> str:
+    """
+    Get API key from request header or fallback to server key
+    Supports BYOK (Bring Your Own Key)
+    """
+    # Try to get user-provided API key from header
+    user_key = request.headers.get("X-API-Key")
+    if user_key:
+        logger.info("Using user-provided API key")
+        return user_key
+
+    # Fallback to server key
+    if OPENROUTER_API_KEY:
+        logger.info("Using server API key")
+        return OPENROUTER_API_KEY
+
+    # No key available
+    raise HTTPException(
+        status_code=401,
+        detail="No API key provided. Either provide your OpenRouter API key via Settings or contact the server admin."
+    )
+
+def get_openai_client(api_key: str) -> OpenAI:
+    """Create OpenAI client with the given API key"""
+    return OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=api_key,
+    )
 
 # Load models once at startup
 logger.info("Loading Marker models...")
@@ -129,7 +153,7 @@ def clean_json_response(text: str) -> str:
         text = text[:-3]
     return text.strip()
 
-def analyze_with_llm(text: str, pass_number: int, metadata: Dict[str, Any], images: List[Dict[str, Any]]) -> Dict[str, Any]:
+def analyze_with_llm(text: str, pass_number: int, metadata: Dict[str, Any], images: List[Dict[str, Any]], api_key: str) -> Dict[str, Any]:
     """
     Analyze paper using the three-pass reading method
     Pass 1: Quick scan (5-10 min) - Overview and main contributions
@@ -293,6 +317,7 @@ Return your analysis as a JSON object with these exact keys:
     try:
         logger.info(f"Starting pass {pass_number} analysis")
 
+        client = get_openai_client(api_key)
         completion = client.chat.completions.create(
             extra_headers={
                 "HTTP-Referer": "https://github.com",
@@ -407,7 +432,7 @@ async def upload_paper(file: UploadFile = File(...)) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"Failed to process paper: {str(e)}")
 
 @app.post("/analyze/paper/{doc_id}")
-async def analyze_paper(doc_id: str, pass_number: int) -> Dict[str, Any]:
+async def analyze_paper(doc_id: str, pass_number: int, request: Request) -> Dict[str, Any]:
     """
     Analyze a processed paper using the three-pass reading method
     - pass_number: 1 (quick scan), 2 (detailed reading), or 3 (deep analysis)
@@ -436,12 +461,16 @@ async def analyze_paper(doc_id: str, pass_number: int) -> Dict[str, Any]:
                 "cached": True
             }
 
+        # Get API key
+        api_key = get_api_key(request)
+
         # Perform new analysis
         analysis_result = analyze_with_llm(
             document.markdown_text,
             pass_number,
             document.metadata,
-            document.images
+            document.images,
+            api_key
         )
 
         # Store the analysis result
@@ -460,7 +489,7 @@ async def analyze_paper(doc_id: str, pass_number: int) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
 @app.post("/deep-research/{doc_id}")
-async def deep_research(doc_id: str, question: Dict[str, str]) -> Dict[str, Any]:
+async def deep_research(doc_id: str, question: Dict[str, str], request: Request) -> Dict[str, Any]:
     """
     Deep research Q&A endpoint
     Ask specific questions about the paper and get detailed answers
@@ -477,7 +506,11 @@ async def deep_research(doc_id: str, question: Dict[str, str]) -> Dict[str, Any]
         if not user_question:
             raise HTTPException(status_code=400, detail="Question is required")
 
+        # Get API key
+        api_key = get_api_key(request)
+
         # Use LLM to answer the question based on the paper
+        client = get_openai_client(api_key)
         completion = client.chat.completions.create(
             extra_headers={
                 "HTTP-Referer": "https://github.com",
@@ -523,7 +556,7 @@ Provide a comprehensive answer based on the paper's content."""
         raise HTTPException(status_code=500, detail=f"Deep research failed: {str(e)}")
 
 @app.post("/extract/citations/{doc_id}")
-async def extract_citations(doc_id: str) -> Dict[str, Any]:
+async def extract_citations(doc_id: str, request: Request) -> Dict[str, Any]:
     """
     Extract citations and references from the paper
     """
@@ -542,7 +575,11 @@ async def extract_citations(doc_id: str) -> Dict[str, Any]:
                 "cached": True
             }
 
+        # Get API key
+        api_key = get_api_key(request)
+
         # Use LLM to extract citations
+        client = get_openai_client(api_key)
         completion = client.chat.completions.create(
             extra_headers={
                 "HTTP-Referer": "https://github.com",

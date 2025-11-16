@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -21,12 +22,14 @@ import {
   FileText,
   TrendingUp,
   Brain,
+  Key,
 } from "lucide-react";
 import { ThemeProvider, useTheme } from "@/components/theme-provider";
 import { useKeyboardShortcuts, useVimMode } from "@/hooks/useVimMode";
 import { KeyboardHelp } from "@/components/keyboard-help";
 import { ExportMenu } from "@/components/export-menu";
 import { PaperLibrary } from "@/components/paper-library";
+import { ApiKeySettings } from "@/components/api-key-settings";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -56,6 +59,7 @@ const ImageDisplay = ({ imageData }) => {
 };
 
 function MainContent() {
+  const searchParams = useSearchParams();
   const [file, setFile] = useState(null);
   const [documentId, setDocumentId] = useState(null);
   const [analysis, setAnalysis] = useState({
@@ -73,9 +77,28 @@ function MainContent() {
   const [question, setQuestion] = useState("");
   const [arxivUrl, setArxivUrl] = useState("");
   const [uploadMode, setUploadMode] = useState("file"); // "file" or "url"
+  const [showApiKeySettings, setShowApiKeySettings] = useState(false);
 
   const { theme, toggleTheme } = useTheme();
   const { vimMode, showHelp, setShowHelp } = useVimMode();
+
+  // Get user's API key from localStorage
+  const getUserApiKey = () => {
+    return localStorage.getItem("arxow-api-key") || "";
+  };
+
+  // Auto-fetch paper from URL parameter
+  useEffect(() => {
+    const arxivParam = searchParams.get("arxiv");
+    if (arxivParam && !documentId) {
+      setArxivUrl(arxivParam);
+      setUploadMode("url");
+      // Auto-fetch the paper
+      setTimeout(() => {
+        uploadFromUrlDirect(arxivParam);
+      }, 500);
+    }
+  }, [searchParams]);
 
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
@@ -102,8 +125,15 @@ function MainContent() {
     formData.append("file", file);
 
     try {
+      const headers = {};
+      const userApiKey = getUserApiKey();
+      if (userApiKey) {
+        headers["X-API-Key"] = userApiKey;
+      }
+
       const response = await fetch(`${API_URL}/upload/paper`, {
         method: "POST",
+        headers,
         body: formData,
       });
 
@@ -115,6 +145,7 @@ function MainContent() {
       const data = await response.json();
       setDocumentId(data.document_id);
       setMetadata(data.metadata);
+      setFile(new File([""], data.filename || file.name, { type: "application/pdf" }));
 
       // Save to library
       savePaperToLibrary({
@@ -134,19 +165,25 @@ function MainContent() {
     }
   };
 
-  const uploadFromUrl = async () => {
-    if (!arxivUrl.trim()) return;
+  const uploadFromUrlDirect = async (url) => {
+    if (!url.trim()) return;
 
     setLoading(true);
     setError(null);
 
     try {
+      const userApiKey = getUserApiKey();
+      const headers = {
+        "Content-Type": "application/json",
+      };
+      if (userApiKey) {
+        headers["X-API-Key"] = userApiKey;
+      }
+
       const response = await fetch(`${API_URL}/upload/from-url`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ url: arxivUrl.trim() }),
+        headers,
+        body: JSON.stringify({ url: url.trim() }),
       });
 
       if (!response.ok) {
@@ -179,6 +216,10 @@ function MainContent() {
     }
   };
 
+  const uploadFromUrl = async () => {
+    return await uploadFromUrlDirect(arxivUrl);
+  };
+
   const analyzePaper = async (passNumber) => {
     let docIdToUse = documentId;
 
@@ -196,10 +237,17 @@ function MainContent() {
     setError(null);
 
     try {
+      const userApiKey = getUserApiKey();
+      const headers = {};
+      if (userApiKey) {
+        headers["X-API-Key"] = userApiKey;
+      }
+
       const response = await fetch(
         `${API_URL}/analyze/paper/${docIdToUse}?pass_number=${passNumber}`,
         {
           method: "POST",
+          headers,
         }
       );
 
@@ -239,11 +287,17 @@ function MainContent() {
     setError(null);
 
     try {
+      const userApiKey = getUserApiKey();
+      const headers = {
+        "Content-Type": "application/json",
+      };
+      if (userApiKey) {
+        headers["X-API-Key"] = userApiKey;
+      }
+
       const response = await fetch(`${API_URL}/deep-research/${documentId}`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers,
         body: JSON.stringify({ question: question.trim() }),
       });
 
@@ -383,6 +437,14 @@ function MainContent() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setShowApiKeySettings(true)}
+              title="API Key Settings"
+            >
+              <Key className="h-4 w-4" />
+            </Button>
             <Button
               variant="outline"
               size="icon"
@@ -666,6 +728,12 @@ function MainContent() {
 
       {/* Keyboard Help Modal */}
       <KeyboardHelp open={showHelp} onClose={() => setShowHelp(false)} />
+
+      {/* API Key Settings Modal */}
+      <ApiKeySettings
+        open={showApiKeySettings}
+        onClose={() => setShowApiKeySettings(false)}
+      />
     </div>
   );
 }
